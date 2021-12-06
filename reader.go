@@ -1,15 +1,14 @@
 package shp
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
-	"bytes"
 )
 
 // Reader provides a interface for reading Shapefiles. Calls
@@ -40,27 +39,10 @@ type readSeekCloser interface {
 	io.Closer
 }
 
-type myFileInfo struct {
-	name string
-	data []byte
-}
-
-type MyFile struct {
-	*bytes.Reader
-	mif myFileInfo
-}
-
-func (mif myFileInfo) Name() string       { return mif.name }
-func (mif myFileInfo) Size() int64        { return int64(len(mif.data)) }
-func (mif myFileInfo) Mode() os.FileMode  { return 0444 }
-func (mif myFileInfo) ModTime() time.Time { return time.Time{} } 
-func (mif myFileInfo) IsDir() bool        { return false }
-func (mif myFileInfo) Sys() interface{}   { return nil }
-
 // OpenBytes opens a Shapefile Bytes for reading.
 func OpenBytes(data []byte, filename string) (*Reader, error) {
 	filename = filename[0 : len(filename)-3]
-	shp := &MyFile{
+	file := &MyFile{
 		Reader: bytes.NewReader(data),
 		mif: myFileInfo{
 			name: filename,
@@ -68,23 +50,48 @@ func OpenBytes(data []byte, filename string) (*Reader, error) {
 		},
 	}
 
-	s := &Reader{filename: filename, shp: shp}
+	s := &Reader{filename: filename, shp: file}
 	s.readHeaders()
 	return s, nil
 }
 
 // Open opens a Shapefile for reading.
 func Open(filename string) (*Reader, error) {
-	ext := filepath.Ext(filename)
-	if strings.ToLower(ext) != ".shp" {
-		return nil, fmt.Errorf("Invalid file extension: %s", filename)
-	}
-	shp, err := os.Open(filename)
+	filename = filename[0 : len(filename)-3]
+	shp, err := os.Open(filename + "shp")
 	if err != nil {
 		return nil, err
 	}
-	s := &Reader{filename: strings.TrimSuffix(filename, ext), shp: shp}
-	return s, s.readHeaders()
+	s := &Reader{filename: filename, shp: shp}
+	s.readHeaders()
+	return s, nil
+}
+
+type myFileInfo struct {
+	name string
+	data []byte
+}
+
+func (mif myFileInfo) Name() string       { return mif.name }
+func (mif myFileInfo) Size() int64        { return int64(len(mif.data)) }
+func (mif myFileInfo) Mode() os.FileMode  { return 0444 }        // Read for all
+func (mif myFileInfo) ModTime() time.Time { return time.Time{} } // Return anything
+func (mif myFileInfo) IsDir() bool        { return false }
+func (mif myFileInfo) Sys() interface{}   { return nil }
+
+type MyFile struct {
+	*bytes.Reader
+	mif myFileInfo
+}
+
+func (mf *MyFile) Close() error { return nil } // Noop, nothing to do
+
+func (mf *MyFile) Readdir(count int) ([]os.FileInfo, error) {
+	return nil, nil // We are not a directory but a single file
+}
+
+func (mf *MyFile) Stat() (os.FileInfo, error) {
+	return mf.mif, nil
 }
 
 // BBox returns the bounding box of the shapefile.
@@ -94,23 +101,21 @@ func (r *Reader) BBox() Box {
 
 // Read and parse headers in the Shapefile. This will
 // fill out GeometryType, filelength and bbox.
-func (r *Reader) readHeaders() error {
-	er := &errReader{Reader: r.shp}
+func (r *Reader) readHeaders() {
 	// don't trust the the filelength in the header
 	r.filelength, _ = r.shp.Seek(0, io.SeekEnd)
 
 	var filelength int32
 	r.shp.Seek(24, 0)
 	// file length
-	binary.Read(er, binary.BigEndian, &filelength)
+	binary.Read(r.shp, binary.BigEndian, &filelength)
 	r.shp.Seek(32, 0)
-	binary.Read(er, binary.LittleEndian, &r.GeometryType)
-	r.bbox.MinX = readFloat64(er)
-	r.bbox.MinY = readFloat64(er)
-	r.bbox.MaxX = readFloat64(er)
-	r.bbox.MaxY = readFloat64(er)
+	binary.Read(r.shp, binary.LittleEndian, &r.GeometryType)
+	r.bbox.MinX = readFloat64(r.shp)
+	r.bbox.MinY = readFloat64(r.shp)
+	r.bbox.MaxX = readFloat64(r.shp)
+	r.bbox.MaxY = readFloat64(r.shp)
 	r.shp.Seek(100, 0)
-	return er.e
 }
 
 func readFloat64(r io.Reader) float64 {
@@ -230,7 +235,7 @@ func (r *Reader) openDbf() (err error) {
 		return
 	}
 
-	r.dbf, err = os.Open(r.filename + ".dbf")
+	r.dbf, err = os.Open(r.filename + "dbf")
 	if err != nil {
 		return
 	}
