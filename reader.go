@@ -38,6 +38,23 @@ type readSeekCloser interface {
 	io.Closer
 }
 
+type myFileInfo struct {
+	name string
+	data []byte
+}
+
+type MyFile struct {
+	*bytes.Reader
+	mif myFileInfo
+}
+
+func (mif myFileInfo) Name() string       { return mif.name }
+func (mif myFileInfo) Size() int64        { return int64(len(mif.data)) }
+func (mif myFileInfo) Mode() os.FileMode  { return 0444 }
+func (mif myFileInfo) ModTime() time.Time { return time.Time{} } 
+func (mif myFileInfo) IsDir() bool        { return false }
+func (mif myFileInfo) Sys() interface{}   { return nil }
+
 // OpenBytes opens a Shapefile Bytes for reading.
 func OpenBytes(data []byte, filename string) (*Reader, error) {
 	filename = filename[0 : len(filename)-3]
