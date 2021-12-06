@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+	"bytes"
 )
 
 // Reader provides a interface for reading Shapefiles. Calls
